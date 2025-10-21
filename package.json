@@ -1,8 +1,10 @@
 {
   "name": "scanimg",
   "version": "1.0.0",
-  "main": "index.js",
-  "bin": "index.js",
+  "main": "src/main.js",
+  "bin": {
+    "scanimg": "./bin/scanimg.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
