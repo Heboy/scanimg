@@ -1,13 +1,14 @@
 # scanimg
 
-A CLI tool that scans source files for image URLs, fetches remote metadata, and reports the size and resolution of each asset.
+A CLI tool that scans source files for image references (remote URLs or local paths), inspects each asset, and reports the size and resolution.
 
 ## Features
 
-- Recursively traverses the target directory (default: current working directory) to extract image URLs.
+- Recursively traverses the target directory (default: current working directory) to extract image references.
+- Supports both remote image URLs and local image files.
 - Issues HEAD/Range requests to estimate remote file size and parse dimensions with a minimal payload.
-- Displays the results in a table including index, URL, size, resolution, status, and occurrence count.
-- Supports configurable concurrency and timeout to adapt to different network conditions.
+- Displays the results in a table including index, target, size, resolution, status, type, and occurrence count.
+- Supports configurable concurrency and timeout to adapt to different workloads.
 - Shows a spinner while requests are in progress, providing instant feedback.
 
 ## Requirements
@@ -38,20 +39,20 @@ If `--dir` is omitted, the current directory is scanned.
 | Option              | Default | Description                                   |
 | ------------------- | ------- | --------------------------------------------- |
 | `--dir <path>`      | `.`     | Directory or file to scan; may be repeated.   |
-| `--timeout <ms>`    | `10000` | Request timeout in milliseconds.              |
-| `--concurrency <n>` | `5`     | Maximum number of concurrent network requests.|
+| `--timeout <ms>`    | `10000` | Request timeout in milliseconds (remote only).|
+| `--concurrency <n>` | `5`     | Maximum number of concurrent inspections.     |
 | `--help`, `-h`      | -       | Show usage information.                       |
 
 ## Sample Output
 
 ```
-Scanning 12 images...
+Inspecting 12 images...
 
-Index | URL                                         | Size     | Resolution | Status                       | Occurrences
------ | ------------------------------------------- | -------- | ---------- | ---------------------------- | -----------
-1     | https://example.com/assets/banner@2x.png    | 1.54 MB  | 1440x900   | OK(HEAD); OK(Range)          | 3
-2     | https://example.com/img/icon.svg            | -        | -          | HEAD 404; GET 404            | 1
-3     | https://cdn.example.com/pic/avatar.webp     | 243.87 KB| 512x512    | OK(HEAD); OK(Range)          | 2
+Index | Target                                      | Type   | Size     | Resolution | Status                       | Occurrences
+----- | ------------------------------------------- | ------ | -------- | ---------- | ---------------------------- | -----------
+1     | https://example.com/assets/banner@2x.png    | Remote | 1.54 MB  | 1440x900   | OK(HEAD); OK(Range)          | 3
+2     | ./public/images/logo.svg                    | Local  | 17.20 KB | 320x80     | OK(file)                     | 4
+3     | https://cdn.example.com/pic/avatar.webp     | Remote | 243.87 KB| 512x512    | OK(HEAD); OK(Range)          | 2
 
 Done.
 ```
@@ -60,9 +61,8 @@ Done.
 
 - Run the tool on a stable network to minimize timeouts or 4xx/5xx failures.
 - If a server denies `content-length` or range requests, the size may appear as `-`; consult the Status column for clues.
-- Currently only remote URLs are analyzed; local image inspection can be added later if needed.
+- Ensure local paths resolve relative to the referencing source file or supply absolute paths when necessary.
 
 ## License
 
 MIT
-

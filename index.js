@@ -1,17 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * CLI: 扫描代码中的图片 URL，并尝试获取远程资源的体积及分辨率。
- *
- * 使用方式：
- *   scanimg --dir ./src2 --dir ./docs
- *
- * 选项：
- *   --dir <path>  指定需要扫描的目录或文件，可以多次传入。若不传，默认扫描当前目录。
- *   --timeout <ms> 请求图片资源的超时时间，默认 10000 毫秒。
- *   --concurrency <num> 同时请求远程资源的最大数量，默认 5。
- */
-
 const fs = require('fs');
 const path = require('path');
 const process = require('process');
@@ -21,7 +9,7 @@ const DEFAULT_TIMEOUT = 10_000;
 const DEFAULT_CONCURRENCY = 5;
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-thresh', 'build', 'coverage']);
 const IMAGE_EXT_PATTERN = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-const IMAGE_URL_REGEX = /https?:\/\/[^\s"'`)(<>]+?\.(?:png|jpe?g|gif|webp|svg|avif|bmp|ico)(?:\?[^\s"'`)(<>]*)?/gi;
+const IMAGE_REF_REGEX = /[^\s"'`)(<>]+?\.(?:png|jpe?g|gif|webp|svg|avif|bmp|ico)(?:\?[^\s"'`)(<>]*)?/gi;
 
 const hasNativeFetch = typeof global.fetch === 'function';
 
@@ -34,7 +22,7 @@ const ensureFetch = async () => {
 
     return fetch;
   } catch (error) {
-    throw new Error('当前 Node.js 环境不支持 fetch，且未安装 node-fetch 依赖。请升级到 Node.js 18+ 或手动安装 node-fetch。');
+    throw new Error('The current Node.js environment does not support fetch and the node-fetch dependency is not installed. Please upgrade to Node.js 18+ or install node-fetch manually.');
   }
 };
 
@@ -52,7 +40,7 @@ const parseArgs = () => {
       case '--dir': {
         const next = args[i + 1];
         if (!next) {
-          throw new Error('参数错误：--dir 需要指定目录或文件路径');
+          throw new Error('Invalid argument: --dir requires a directory or file path.');
         }
         options.dir.push(next);
         i += 1;
@@ -61,7 +49,7 @@ const parseArgs = () => {
       case '--timeout': {
         const next = Number(args[i + 1]);
         if (Number.isNaN(next) || next <= 0) {
-          throw new Error('参数错误：--timeout 需要是大于 0 的数字');
+          throw new Error('Invalid argument: --timeout must be a number greater than 0.');
         }
         options.timeout = next;
         i += 1;
@@ -70,7 +58,7 @@ const parseArgs = () => {
       case '--concurrency': {
         const next = Number(args[i + 1]);
         if (!Number.isInteger(next) || next <= 0) {
-          throw new Error('参数错误：--concurrency 需要是大于 0 的整数');
+          throw new Error('Invalid argument: --concurrency must be an integer greater than 0.');
         }
         options.concurrency = next;
         i += 1;
@@ -82,7 +70,7 @@ const parseArgs = () => {
         process.exit(0);
         break;
       default:
-        throw new Error(`未知参数：${arg}`);
+        throw new Error(`Unknown argument: ${arg}`);
     }
   }
 
@@ -97,11 +85,11 @@ const printHelp = () => {
   const help = `
 scanimg --dir <path> [--dir <path> ...] [--timeout <ms>] [--concurrency <num>]
 
-选项说明：
-  --dir <path>          指定扫描的目录或文件，可重复多次传入（默认当前目录）
-  --timeout <ms>        请求超时时间，默认 10000 毫秒
-  --concurrency <num>   并发请求数，默认 5
-  --help, -h            查看帮助
+Options:
+  --dir <path>          Specify directories or files to scan, can be provided multiple times (defaults to current directory)
+  --timeout <ms>        Request timeout in milliseconds (default: 10000)
+  --concurrency <num>   Number of concurrent requests (default: 5)
+  --help, -h            Show help information
 `.trim();
 
   console.log(help);
@@ -134,8 +122,8 @@ const walkFiles = async (inputPath, fileList = []) => {
   return fileList;
 };
 
-const extractImageUrls = (content) => {
-  const matches = content.match(IMAGE_URL_REGEX);
+const extractImageReferences = (content) => {
+  const matches = content.match(IMAGE_REF_REGEX);
   if (!matches) {
     return [];
   }
@@ -145,18 +133,77 @@ const extractImageUrls = (content) => {
     .filter((item) => IMAGE_EXT_PATTERN.test(item));
 };
 
+const classifyImageReference = (rawValue, sourceFile) => {
+  if (!rawValue) {
+    return null;
+  }
+
+  const trimmedValue = rawValue.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+
+  if (/^data:/i.test(trimmedValue)) {
+    return null;
+  }
+
+  const isHttpUrl = /^https?:\/\//i.test(trimmedValue);
+  const isProtocolRelative = trimmedValue.startsWith('//');
+
+  if (isHttpUrl || isProtocolRelative) {
+    const normalized = isProtocolRelative ? `https:${trimmedValue}` : trimmedValue;
+
+    return {
+      id: `remote::${normalized}`,
+      type: 'remote',
+      request: normalized,
+      display: normalized,
+    };
+  }
+
+  let candidatePath = trimmedValue;
+
+  if (/^file:\/\//i.test(candidatePath)) {
+    try {
+      const fileUrl = new URL(candidatePath);
+      candidatePath = fileUrl.pathname;
+      if (process.platform === 'win32' && candidatePath.startsWith('/')) {
+        candidatePath = candidatePath.slice(1);
+      }
+      candidatePath = decodeURIComponent(candidatePath);
+    } catch {
+      candidatePath = candidatePath.replace(/^file:\/\//i, '');
+    }
+  }
+
+  const cleanPath = candidatePath.replace(/[?#].*$/, '');
+  const baseDir = path.dirname(sourceFile);
+  const absolutePath = path.isAbsolute(cleanPath)
+    ? cleanPath
+    : path.resolve(baseDir, cleanPath);
+  const normalizedPath = path.normalize(absolutePath);
+  const display = path.relative(process.cwd(), normalizedPath) || normalizedPath;
+
+  return {
+    id: `local::${normalizedPath}`,
+    type: 'local',
+    request: normalizedPath,
+    display,
+  };
+};
+
 const readFileSafe = async (filePath) => {
   try {
     return await fs.promises.readFile(filePath, 'utf8');
   } catch (error) {
-    console.warn(`[scanimg] 无法读取文件：${filePath}，已跳过。原因：${error.message}`);
+    console.warn(`[scanimg] Failed to read file: ${filePath}. Skipped. Reason: ${error.message}`);
 
     return '';
   }
 };
 
-const collectUrls = async (srcPaths) => {
-  const urlMap = new Map();
+const collectImageTargets = async (srcPaths) => {
+  const targetMap = new Map();
 
   for (const srcPath of srcPaths) {
     const absPath = path.resolve(srcPath);
@@ -166,19 +213,25 @@ const collectUrls = async (srcPaths) => {
       const content = await readFileSafe(file);
       if (!content) continue;
 
-      const urls = extractImageUrls(content);
-      if (!urls.length) continue;
+      const references = extractImageReferences(content);
+      if (!references.length) continue;
 
-      for (const url of urls) {
-        if (!urlMap.has(url)) {
-          urlMap.set(url, new Set());
+      for (const reference of references) {
+        const classified = classifyImageReference(reference, file);
+        if (!classified) continue;
+
+        if (!targetMap.has(classified.id)) {
+          targetMap.set(classified.id, {
+            ...classified,
+            sources: new Set(),
+          });
         }
-        urlMap.get(url).add(file);
+        targetMap.get(classified.id).sources.add(file);
       }
     }
   }
 
-  return urlMap;
+  return targetMap;
 };
 
 const fetchWithTimeout = async (fetchImpl, url, options = {}) => {
@@ -219,9 +272,9 @@ const parseNumber = (value) => {
 
 const getRemoteImageMetadata = async (fetchImpl, url, timeout) => {
   const result = {
-    url,
+    target: url,
     size: null,
-    status: '未知',
+    status: 'Unknown',
     width: null,
     height: null,
   };
@@ -247,7 +300,7 @@ const getRemoteImageMetadata = async (fetchImpl, url, timeout) => {
       statusMessages.push(`HEAD ${headRes.status}`);
     }
   } catch (error) {
-    statusMessages.push(error.name === 'AbortError' ? 'HEAD超时' : `HEAD失败: ${error.message}`);
+    statusMessages.push(error.name === 'AbortError' ? 'HEAD timeout' : `HEAD failed: ${error.message}`);
   }
 
   try {
@@ -262,7 +315,7 @@ const getRemoteImageMetadata = async (fetchImpl, url, timeout) => {
     if (!rangeRes.ok) {
       statusMessages.push(`GET ${rangeRes.status}`);
 
-      result.status = statusMessages.join('; ') || '未知';
+      result.status = statusMessages.join('; ') || 'Unknown';
 
       return result;
     }
@@ -289,16 +342,66 @@ const getRemoteImageMetadata = async (fetchImpl, url, timeout) => {
         result.width = width;
         result.height = height;
       } else {
-        statusMessages.push('分辨率解析失败');
+        statusMessages.push('Failed to parse resolution');
       }
     } catch (error) {
-      statusMessages.push(`分辨率解析失败: ${error.message}`);
+      statusMessages.push(`Failed to parse resolution: ${error.message}`);
     }
   } catch (error) {
-    statusMessages.push(error.name === 'AbortError' ? 'GET超时' : `GET失败: ${error.message}`);
+    statusMessages.push(error.name === 'AbortError' ? 'GET timeout' : `GET failed: ${error.message}`);
   }
 
-  result.status = statusMessages.join('; ') || '未知';
+  result.status = statusMessages.join('; ') || 'Unknown';
+
+  return result;
+};
+
+const getLocalImageMetadata = async (absolutePath) => {
+  const relativeTarget = path.relative(process.cwd(), absolutePath) || absolutePath;
+  const result = {
+    target: relativeTarget,
+    size: null,
+    status: 'Unknown',
+    width: null,
+    height: null,
+  };
+
+  const statusMessages = [];
+
+  try {
+    const stat = await fs.promises.stat(absolutePath);
+    if (!stat.isFile()) {
+      statusMessages.push('Not a file');
+      result.status = statusMessages.join('; ') || 'Unknown';
+
+      return result;
+    }
+
+    result.size = stat.size;
+  } catch (error) {
+    statusMessages.push(error.code === 'ENOENT' ? 'File not found' : `File access failed: ${error.message}`);
+    result.status = statusMessages.join('; ') || 'Unknown';
+
+    return result;
+  }
+
+  try {
+    const { width, height } = imageSize(absolutePath);
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      result.width = width;
+      result.height = height;
+    } else {
+      statusMessages.push('Failed to parse resolution');
+    }
+  } catch (error) {
+    statusMessages.push(`Failed to parse resolution: ${error.message}`);
+  }
+
+  if (!statusMessages.length) {
+    statusMessages.push('OK(file)');
+  }
+
+  result.status = statusMessages.join('; ') || 'Unknown';
 
   return result;
 };
@@ -352,14 +455,15 @@ const formatResolution = (width, height) => {
 
 const renderTable = (rows) => {
   if (!rows.length) {
-    console.log('未找到任何图片 URL。');
+    console.log('No images found.');
 
     return;
   }
 
   const tableData = rows.map((row, index) => ({
     Index: index + 1,
-    URL: row.url,
+    Target: row.target,
+    Type: row.type === 'remote' ? 'Remote' : 'Local',
     Size: formatBytes(row.size),
     Resolution: formatResolution(row.width, row.height),
     Status: row.status,
@@ -373,28 +477,48 @@ const main = async () => {
   try {
     const options = parseArgs();
 
-    const urlMap = await collectUrls(options.dir);
+    const targetMap = await collectImageTargets(options.dir);
 
-    if (!urlMap.size) {
-      console.log('未在指定范围内找到任何图片 URL。');
+    if (!targetMap.size) {
+      console.log('No images found within the provided paths.');
       return;
     }
 
-    const fetchImpl = await ensureFetch();
-    const urls = Array.from(urlMap.keys());
+    const targets = Array.from(targetMap.values());
+    const hasRemoteTargets = targets.some((item) => item.type === 'remote');
+    const fetchImpl = hasRemoteTargets ? await ensureFetch() : null;
 
-    const spinnerInterval = startSpinner(`共 ${urls.length} 张图片，开始请求...`);
+    const spinnerInterval = startSpinner(`Inspecting ${targets.length} images...`);
 
     const results = await promisePool(
-      urls,
+      targets,
       options.concurrency,
-      async (url) => getRemoteImageMetadata(fetchImpl, url, options.timeout),
+      async (item) => {
+        if (item.type === 'remote') {
+          const metadata = await getRemoteImageMetadata(fetchImpl, item.request, options.timeout);
+          return {
+            ...metadata,
+            id: item.id,
+            type: item.type,
+            target: item.display,
+          };
+        }
+
+        const metadata = await getLocalImageMetadata(item.request);
+
+        return {
+          ...metadata,
+          id: item.id,
+          type: item.type,
+          target: item.display,
+        };
+      },
     );
 
     stopSpinner(spinnerInterval);
 
     const rows = results.map((item) => {
-      const sources = urlMap.get(item.url) || new Set();
+      const sources = targetMap.get(item.id)?.sources ?? new Set();
 
       return {
         ...item,
@@ -411,14 +535,14 @@ const main = async () => {
 
     renderTable(sortedRows);
   } catch (error) {
-    console.error(`执行失败：${error.message}`);
+    console.error(`Execution failed: ${error.message}`);
     process.exitCode = 1;
   }
 };
 
 main();
 
-function startSpinner(message = '处理中...') {
+function startSpinner(message = 'Processing...') {
   const frames = ['-', '\\', '|', '/'];
   let index = 0;
 
@@ -433,5 +557,5 @@ function startSpinner(message = '处理中...') {
 function stopSpinner(intervalId) {
   if (!intervalId) return;
   clearInterval(intervalId);
-  process.stdout.write('\r处理完成                          \n');
+  process.stdout.write('\rProcessing complete                          \n');
 }

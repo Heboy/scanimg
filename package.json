@@ -2,8 +2,12 @@
   "name": "scanimg",
   "version": "1.0.0",
   "main": "index.js",
+  "bin": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+     "image-size": "^1.1.1"
   },
   "author": "Heboy",
   "license": "MIT",
