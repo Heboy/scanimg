@@ -19,11 +19,7 @@ A CLI tool that scans source files for image references (remote URLs or local pa
 ## Installation
 
 ```bash
-pnpm install
-# or
-yarn install
-# or
-npm install
+npm install scanimg -g
 ```
 
 ## Usage

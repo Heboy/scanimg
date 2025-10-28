@@ -1,6 +1,6 @@
 {
   "name": "scanimg",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "src/main.js",
   "bin": {
     "scanimg": "./bin/scanimg.js"
@@ -11,7 +11,12 @@
   "dependencies": {
      "image-size": "^1.1.1"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Heboy/scanimg"
+  },
+  "homepage": "https://github.com/Heboy/scanimg",
   "author": "Heboy",
   "license": "MIT",
-  "description": ""
+  "description": "a CLI that crawls given directories and files, discovers both local images and remote image URLs, and reports their metadata—file size, dimensions, and status—in a sortable table with configurable concurrency, timeouts, and ignore rules."
 }
